@@ -171,9 +171,7 @@
       <details open>
         <summary><span id="vaultTitle">Резерв</span> <span id="vaultCount">(0)</span></summary>
 
-        <div class="muted" id="vaultHelp">
-          Формат: English sentence - Русский смысл, по одному на строку. Разделитель: пробел + (-/–/—) + пробел.
-        </div>
+        <div class="muted" id="vaultHelp">Формат: EN - RU</div>
 
         <div class="taWrap">
           <textarea id="vaultTextarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
@@ -202,9 +200,9 @@
 
 <script>
 (() => {
-  const LS_APP_MODE = 'vz_mode_v1';     // 'words' | 'sent'
-  const LS_DIR      = 'vz_dir_v1';      // 'EN_RU' | 'RU_EN'
-  const LS_MIGRATED = 'vz_migrated_v1'; // '1'
+  const LS_APP_MODE = 'vz_mode_v1';
+  const LS_DIR      = 'vz_dir_v1';
+  const LS_MIGRATED = 'vz_migrated_v1';
 
   const K = {
     words: { active:'vz_words_active_v1', vault:'vz_words_vault_v1', learned:'vz_words_learned_v1' },
@@ -231,13 +229,10 @@
   const btnSkip   = document.getElementById('skipBtn');
   const btnRepeat = document.getElementById('repeatBtn');
 
-  const elVaultTitle = document.getElementById('vaultTitle');
-  const elVaultHelp  = document.getElementById('vaultHelp');
   const elVaultCount = document.getElementById('vaultCount');
   const taVault      = document.getElementById('vaultTextarea');
   const btnSaveVault = document.getElementById('saveVaultBtn');
 
-  const elLearnedTitle = document.getElementById('learnedTitle');
   const elLearnedCount = document.getElementById('learnedCount');
   const taLearned      = document.getElementById('learnedTextarea');
   const btnClearLearned= document.getElementById('clearLearnedBtn');
@@ -268,40 +263,43 @@
     return { out, removed };
   }
 
-  // Разделитель между EN и RU: пробел + (-/–/—) + пробел (и режем только по ПЕРВОМУ совпадению).
-  function splitLine(line) {
+  // Разделитель: пробел + (-/–/—) + пробел (первое совпадение).
+  function splitLineSmart(line) {
     const s = String(line ?? '').trim();
-    const re = /\s[-–—]\s/;
-    const m = re.exec(s);
+    const m = /\s[-–—]\s/.exec(s);
     if (!m) return [s, ''];
     const i = m.index;
     const sepLen = m[0].length;
     return [s.slice(0, i).trim(), s.slice(i + sepLen).trim()];
   }
 
-  // ✅ РЕМОНТ: если b пустой, но a содержит " EN - RU " (или EN – RU / EN — RU), восстанавливаем пару.
-  function repairPairsArray(arr) {
-    if (!Array.isArray(arr)) return [];
-    const fixed = [];
-    for (const it of arr) {
-      if (!it) continue;
-      let a = (typeof it.a === 'string') ? it.a.trim() : '';
-      let b = (typeof it.b === 'string') ? it.b.trim() : '';
-
-      if (a && !b) {
-        const [la, lb] = splitLine(a);
-        if (la && lb) { a = la; b = lb; }
-      }
-
-      // На всякий случай: если кто-то сохранил {a:"", b:"EN - RU"} — тоже поправим
-      if (!a && b) {
-        const [la, lb] = splitLine(b);
-        if (la && lb) { a = la; b = lb; }
-      }
-
-      fixed.push({ a, b });
+  // ✅ Главный "умный обход": нормализуем элемент НА ЛЕТУ (и для тренировки, и для вывода в textarea)
+  function normalizeItem(it) {
+    // поддержка старых форматов
+    let a = '', b = '';
+    if (it && typeof it === 'object') {
+      if (typeof it.a === 'string') a = it.a.trim();
+      if (typeof it.b === 'string') b = it.b.trim();
+      if (!a && typeof it.en === 'string') a = it.en.trim();
+      if (!b && typeof it.ru === 'string') b = it.ru.trim();
     }
-    return dedupePairs(fixed).out;
+
+    // если в a уже "EN – RU" (или EN - RU / EN — RU) — режем и используем
+    if (a) {
+      const [la, lb] = splitLineSmart(a);
+      if (la && lb) {
+        a = la;
+        if (!b) b = lb;
+      }
+    }
+
+    // если вдруг наоборот
+    if (!a && b) {
+      const [la, lb] = splitLineSmart(b);
+      if (la && lb) { a = la; b = lb; }
+    }
+
+    return { a, b };
   }
 
   function parseTextarea(text) {
@@ -309,7 +307,7 @@
     const pairs = [];
     const bad = [];
     for (const ln of lines) {
-      const [a,b] = splitLine(ln);
+      const [a,b] = splitLineSmart(ln);
       if (!a || !b) { bad.push(ln); continue; }
       pairs.push({ a, b });
     }
@@ -337,8 +335,8 @@
     return out;
   }
 
-  let appMode = loadStr(LS_APP_MODE, 'words'); // words | sent
-  let dirMode = loadStr(LS_DIR, 'EN_RU');      // EN_RU | RU_EN
+  let appMode = loadStr(LS_APP_MODE, 'words');
+  let dirMode = loadStr(LS_DIR, 'EN_RU');
 
   const S = {
     words: { active: [], vault: [], learned: [] },
@@ -393,13 +391,9 @@
     S[modeKey].active  = loadJSON(keys.active,  []);
     S[modeKey].vault   = loadJSON(keys.vault,   []);
     S[modeKey].learned = loadJSON(keys.learned, []);
-
-    // ✅ Авто-ремонт того, что уже было сохранено криво
-    S[modeKey].active  = repairPairsArray(S[modeKey].active);
-    S[modeKey].vault   = repairPairsArray(S[modeKey].vault);
-    S[modeKey].learned = repairPairsArray(S[modeKey].learned);
-
-    saveModeData(modeKey);
+    if (!Array.isArray(S[modeKey].active))  S[modeKey].active = [];
+    if (!Array.isArray(S[modeKey].vault))   S[modeKey].vault = [];
+    if (!Array.isArray(S[modeKey].learned)) S[modeKey].learned = [];
   }
 
   function saveModeData(modeKey) {
@@ -410,11 +404,6 @@
   }
 
   function modeLabel(){ return appMode === 'words' ? 'Слова' : 'Предложения'; }
-  function reserveHelpText(){
-    return appMode === 'words'
-      ? 'Формат: english - русский, по одному на строку. Разделитель: пробел + (-/–/—) + пробел.'
-      : 'Формат: English sentence - Русский смысл, по одному на строку. Разделитель: пробел + (-/–/—) + пробел.';
-  }
 
   function setMsg(text, kind=''){
     elMsg.textContent = text || '';
@@ -424,15 +413,25 @@
 
   function syncTextareas(){
     const st = S[appMode];
-    taVault.value = st.vault.map(x => `${x.a} - ${x.b}`).join('\n');
-    taLearned.value = st.learned.map(x => `${x.a} - ${x.b}`).join('\n');
+    const v = st.vault.map(x => {
+      const n = normalizeItem(x);
+      return (n.a && n.b) ? `${n.a} - ${n.b}` : '';
+    }).filter(Boolean).join('\n');
+
+    const l = st.learned.map(x => {
+      const n = normalizeItem(x);
+      return (n.a && n.b) ? `${n.a} - ${n.b}` : '';
+    }).filter(Boolean).join('\n');
+
+    taVault.value = v;
+    taLearned.value = l;
+
     elVaultCount.textContent = `(${st.vault.length})`;
     elLearnedCount.textContent = `(${st.learned.length})`;
-    elVaultTitle.textContent = 'Резерв';
-    elLearnedTitle.textContent = 'Выучено';
-    elVaultHelp.textContent = reserveHelpText();
+
     btnNew.textContent = 'Новые';
     btnDir.textContent = (dirMode === 'EN_RU') ? 'EN→RU' : 'RU→EN';
+
     dotLeft.classList.toggle('on', appMode === 'words');
     dotRight.classList.toggle('on', appMode === 'sent');
   }
@@ -441,12 +440,17 @@
     const st = S[appMode];
     if (!current) return null;
 
-    const question = (dirMode === 'EN_RU') ? current.a : current.b;
-    const correct  = (dirMode === 'EN_RU') ? current.b : current.a;
+    const curN = normalizeItem(current);
+    const question = (dirMode === 'EN_RU') ? curN.a : curN.b;
+    const correct  = (dirMode === 'EN_RU') ? curN.b : curN.a;
 
     const pool = st.active
       .filter(x => x !== current)
-      .map(x => (dirMode === 'EN_RU') ? x.b : x.a);
+      .map(x => {
+        const n = normalizeItem(x);
+        return (dirMode === 'EN_RU') ? n.b : n.a;
+      })
+      .filter(Boolean);
 
     const wrongs = pickWrongOptions(pool, correct, 3);
     const options = shuffle([correct, ...wrongs]);
@@ -472,7 +476,12 @@
     }
 
     const q = buildQuestion();
-    if (!q) return;
+    if (!q || !q.question || !q.correct){
+      // если актив содержит мусор — просто перешагиваем
+      setMsg('Есть кривые строки в активном наборе. Пропускаю…','bad');
+      setTimeout(goNext, 120);
+      return;
+    }
 
     elQuestion.textContent = q.question;
     elHint.textContent = (dirMode === 'EN_RU')
@@ -552,15 +561,18 @@
 
     let msg = 'Сохранено ✅';
     const parts = [];
-    if (removed>0) parts.push(`дублей удалено: ${removed}`);
-    if (badCount>0) parts.push(`строк пропущено: ${badCount}`);
+    if (removed>0) parts.push(`дублей: ${removed}`);
+    if (badCount>0) parts.push(`пропущено: ${badCount}`);
     if (parts.length) msg += ` (${parts.join(', ')})`;
     setMsg(msg,'ok');
   }
 
   function moveActiveToLearned(){
     const st = S[appMode];
-    const merged = [...st.learned, ...st.active];
+    const merged = [...st.learned, ...st.active]
+      .map(normalizeItem)
+      .filter(x => x.a && x.b)
+      .map(x => ({a:x.a, b:x.b}));
     st.learned = dedupePairs(merged).out;
     saveModeData(appMode);
   }
@@ -571,10 +583,15 @@
     if (st.active.length) moveActiveToLearned();
 
     const shuffledVault = shuffle(st.vault.slice());
-    const take = shuffledVault.slice(0, BATCH_SIZE);
+    const takeRaw = shuffledVault.slice(0, BATCH_SIZE).map(normalizeItem);
+    const take = takeRaw.filter(x => x.a && x.b).map(x => ({a:x.a, b:x.b}));
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
-    const rest = st.vault.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
+    const rest = st.vault
+      .map(normalizeItem)
+      .filter(x => x.a && x.b)
+      .map(x => ({a:x.a, b:x.b}))
+      .filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
 
     st.active = take;
     st.vault = rest;
@@ -595,11 +612,15 @@
   function takeRepeatFromLearned(){
     const st = S[appMode];
 
-    const shuffled = shuffle(st.learned.slice());
-    const take = shuffled.slice(0, BATCH_SIZE);
+    const shuffled = shuffle(st.learned.slice()).map(normalizeItem);
+    const take = shuffled.slice(0, BATCH_SIZE).filter(x => x.a && x.b).map(x => ({a:x.a, b:x.b}));
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
-    const rest = st.learned.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
+    const rest = st.learned
+      .map(normalizeItem)
+      .filter(x => x.a && x.b)
+      .map(x => ({a:x.a, b:x.b}))
+      .filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
 
     st.active = take;
     st.learned = rest;
