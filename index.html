@@ -66,7 +66,6 @@
     }
     .smallbtn:active{ transform:scale(0.99); }
 
-    /* Compact mode toggle */
     .modeToggle{
       width:44px; height:38px;
       border-radius:12px;
@@ -173,7 +172,7 @@
         <summary><span id="vaultTitle">Резерв</span> <span id="vaultCount">(0)</span></summary>
 
         <div class="muted" id="vaultHelp">
-          Формат: English sentence - Русский смысл, по одному на строку.
+          Формат: English sentence - Русский смысл, по одному на строку. Разделитель: пробел + (-/–/—) + пробел.
         </div>
 
         <div class="taWrap">
@@ -269,21 +268,40 @@
     return { out, removed };
   }
 
-  // ✅ Главный фикс: разделитель между EN и RU — это ОДНО из: " - " / " – " / " — "
-  // и мы режем только по ПЕРВОМУ такому разделителю, не трогая тире внутри текста.
+  // Разделитель между EN и RU: пробел + (-/–/—) + пробел (и режем только по ПЕРВОМУ совпадению).
   function splitLine(line) {
-    const s = line.trim();
-    // Ищем только "пробел + ( - или – или — ) + пробел" (можно несколько пробелов).
+    const s = String(line ?? '').trim();
     const re = /\s[-–—]\s/;
     const m = re.exec(s);
     if (!m) return [s, ''];
-
     const i = m.index;
     const sepLen = m[0].length;
+    return [s.slice(0, i).trim(), s.slice(i + sepLen).trim()];
+  }
 
-    const left = s.slice(0, i).trim();
-    const right = s.slice(i + sepLen).trim();
-    return [left, right];
+  // ✅ РЕМОНТ: если b пустой, но a содержит " EN - RU " (или EN – RU / EN — RU), восстанавливаем пару.
+  function repairPairsArray(arr) {
+    if (!Array.isArray(arr)) return [];
+    const fixed = [];
+    for (const it of arr) {
+      if (!it) continue;
+      let a = (typeof it.a === 'string') ? it.a.trim() : '';
+      let b = (typeof it.b === 'string') ? it.b.trim() : '';
+
+      if (a && !b) {
+        const [la, lb] = splitLine(a);
+        if (la && lb) { a = la; b = lb; }
+      }
+
+      // На всякий случай: если кто-то сохранил {a:"", b:"EN - RU"} — тоже поправим
+      if (!a && b) {
+        const [la, lb] = splitLine(b);
+        if (la && lb) { a = la; b = lb; }
+      }
+
+      fixed.push({ a, b });
+    }
+    return dedupePairs(fixed).out;
   }
 
   function parseTextarea(text) {
@@ -375,9 +393,13 @@
     S[modeKey].active  = loadJSON(keys.active,  []);
     S[modeKey].vault   = loadJSON(keys.vault,   []);
     S[modeKey].learned = loadJSON(keys.learned, []);
-    if (!Array.isArray(S[modeKey].active))  S[modeKey].active = [];
-    if (!Array.isArray(S[modeKey].vault))   S[modeKey].vault = [];
-    if (!Array.isArray(S[modeKey].learned)) S[modeKey].learned = [];
+
+    // ✅ Авто-ремонт того, что уже было сохранено криво
+    S[modeKey].active  = repairPairsArray(S[modeKey].active);
+    S[modeKey].vault   = repairPairsArray(S[modeKey].vault);
+    S[modeKey].learned = repairPairsArray(S[modeKey].learned);
+
+    saveModeData(modeKey);
   }
 
   function saveModeData(modeKey) {
@@ -539,8 +561,7 @@
   function moveActiveToLearned(){
     const st = S[appMode];
     const merged = [...st.learned, ...st.active];
-    const { out } = dedupePairs(merged);
-    st.learned = out;
+    st.learned = dedupePairs(merged).out;
     saveModeData(appMode);
   }
 
