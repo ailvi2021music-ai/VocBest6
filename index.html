@@ -173,7 +173,7 @@
         <summary><span id="vaultTitle">Резерв</span> <span id="vaultCount">(0)</span></summary>
 
         <div class="muted" id="vaultHelp">
-          Формат: english - русский, по одному на строку. Разделитель строго: пробел-дефис-пробел.
+          Формат: English sentence - Русский смысл, по одному на строку.
         </div>
 
         <div class="taWrap">
@@ -269,14 +269,21 @@
     return { out, removed };
   }
 
+  // ✅ Главный фикс: разделитель между EN и RU — это ОДНО из: " - " / " – " / " — "
+  // и мы режем только по ПЕРВОМУ такому разделителю, не трогая тире внутри текста.
   function splitLine(line) {
     const s = line.trim();
-    // Разделитель ТОЛЬКО: " - " (пробел-дефис-пробел).
-    // Длинные тире — и любые тире внутри текста — не трогаем.
-    const sep = ' - ';
-    const i = s.indexOf(sep);
-    if (i > -1) return [s.slice(0,i).trim(), s.slice(i+sep.length).trim()];
-    return [s,''];
+    // Ищем только "пробел + ( - или – или — ) + пробел" (можно несколько пробелов).
+    const re = /\s[-–—]\s/;
+    const m = re.exec(s);
+    if (!m) return [s, ''];
+
+    const i = m.index;
+    const sepLen = m[0].length;
+
+    const left = s.slice(0, i).trim();
+    const right = s.slice(i + sepLen).trim();
+    return [left, right];
   }
 
   function parseTextarea(text) {
@@ -383,8 +390,8 @@
   function modeLabel(){ return appMode === 'words' ? 'Слова' : 'Предложения'; }
   function reserveHelpText(){
     return appMode === 'words'
-      ? 'Формат: english - русский, по одному на строку. Разделитель строго: пробел-дефис-пробел.'
-      : 'Формат: English sentence - Русский смысл, по одному на строку. Разделитель строго: пробел-дефис-пробел.';
+      ? 'Формат: english - русский, по одному на строку. Разделитель: пробел + (-/–/—) + пробел.'
+      : 'Формат: English sentence - Русский смысл, по одному на строку. Разделитель: пробел + (-/–/—) + пробел.';
   }
 
   function setMsg(text, kind=''){
@@ -475,7 +482,7 @@
       lock = true;
       setMsg('Молодец ✅','ok');
       disableAnswers(true);
-      setTimeout(goNext, 350);
+      setTimeout(goNext, AUTO_NEXT_MS);
     } else {
       setMsg(`Неправильно ❌ Правильный: ${correct}`,'bad');
     }
@@ -539,16 +546,18 @@
 
   function takeNewBatchFromVault(){
     const st = S[appMode];
+
     if (st.active.length) moveActiveToLearned();
 
     const shuffledVault = shuffle(st.vault.slice());
-    const take = shuffledVault.slice(0, 10);
+    const take = shuffledVault.slice(0, BATCH_SIZE);
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
     const rest = st.vault.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
 
     st.active = take;
     st.vault = rest;
+
     saveModeData(appMode);
 
     if (st.active.length < 4){
@@ -566,7 +575,7 @@
     const st = S[appMode];
 
     const shuffled = shuffle(st.learned.slice());
-    const take = shuffled.slice(0, 10);
+    const take = shuffled.slice(0, BATCH_SIZE);
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
     const rest = st.learned.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
