@@ -200,9 +200,9 @@
 
 <script>
 (() => {
-  const LS_APP_MODE = 'vz_mode_v1';
-  const LS_DIR      = 'vz_dir_v1';
-  const LS_MIGRATED = 'vz_migrated_v1';
+  const LS_APP_MODE = 'vz_mode_v1';     // 'words' | 'sent'
+  const LS_DIR      = 'vz_dir_v1';      // 'EN_RU' | 'RU_EN'
+  const LS_MIGRATED = 'vz_migrated_v1'; // '1'
 
   const K = {
     words: { active:'vz_words_active_v1', vault:'vz_words_vault_v1', learned:'vz_words_learned_v1' },
@@ -263,8 +263,10 @@
     return { out, removed };
   }
 
-  // Разделитель: пробел + (-/–/—) + пробел (первое совпадение).
-  function splitLineSmart(line) {
+  // Делим строку ТОЛЬКО при сохранении из textarea:
+  // берём ПЕРВЫЙ разделитель вида: пробел + (-/–/—) + пробел.
+  // Вся правая часть сохраняется целиком (включая любые тире внутри перевода).
+  function splitLineForSave(line) {
     const s = String(line ?? '').trim();
     const m = /\s[-–—]\s/.exec(s);
     if (!m) return [s, ''];
@@ -273,45 +275,16 @@
     return [s.slice(0, i).trim(), s.slice(i + sepLen).trim()];
   }
 
-  // ✅ Главный "умный обход": нормализуем элемент НА ЛЕТУ (и для тренировки, и для вывода в textarea)
-  function normalizeItem(it) {
-    // поддержка старых форматов
-    let a = '', b = '';
-    if (it && typeof it === 'object') {
-      if (typeof it.a === 'string') a = it.a.trim();
-      if (typeof it.b === 'string') b = it.b.trim();
-      if (!a && typeof it.en === 'string') a = it.en.trim();
-      if (!b && typeof it.ru === 'string') b = it.ru.trim();
-    }
-
-    // если в a уже "EN – RU" (или EN - RU / EN — RU) — режем и используем
-    if (a) {
-      const [la, lb] = splitLineSmart(a);
-      if (la && lb) {
-        a = la;
-        if (!b) b = lb;
-      }
-    }
-
-    // если вдруг наоборот
-    if (!a && b) {
-      const [la, lb] = splitLineSmart(b);
-      if (la && lb) { a = la; b = lb; }
-    }
-
-    return { a, b };
-  }
-
   function parseTextarea(text) {
     const lines = String(text ?? '').split('\n').map(x => x.trim()).filter(Boolean);
     const pairs = [];
-    const bad = [];
+    let badCount = 0;
     for (const ln of lines) {
-      const [a,b] = splitLineSmart(ln);
-      if (!a || !b) { bad.push(ln); continue; }
+      const [a,b] = splitLineForSave(ln);
+      if (!a || !b) { badCount++; continue; }
       pairs.push({ a, b });
     }
-    return { pairs, badCount: bad.length };
+    return { pairs, badCount };
   }
 
   function shuffle(arr) {
@@ -413,44 +386,25 @@
 
   function syncTextareas(){
     const st = S[appMode];
-    const v = st.vault.map(x => {
-      const n = normalizeItem(x);
-      return (n.a && n.b) ? `${n.a} - ${n.b}` : '';
-    }).filter(Boolean).join('\n');
-
-    const l = st.learned.map(x => {
-      const n = normalizeItem(x);
-      return (n.a && n.b) ? `${n.a} - ${n.b}` : '';
-    }).filter(Boolean).join('\n');
-
-    taVault.value = v;
-    taLearned.value = l;
-
+    taVault.value = st.vault.map(x => `${x.a} - ${x.b}`).join('\n');
+    taLearned.value = st.learned.map(x => `${x.a} - ${x.b}`).join('\n');
     elVaultCount.textContent = `(${st.vault.length})`;
     elLearnedCount.textContent = `(${st.learned.length})`;
-
     btnNew.textContent = 'Новые';
     btnDir.textContent = (dirMode === 'EN_RU') ? 'EN→RU' : 'RU→EN';
-
     dotLeft.classList.toggle('on', appMode === 'words');
     dotRight.classList.toggle('on', appMode === 'sent');
   }
 
   function buildQuestion(){
-    const st = S[appMode];
     if (!current) return null;
 
-    const curN = normalizeItem(current);
-    const question = (dirMode === 'EN_RU') ? curN.a : curN.b;
-    const correct  = (dirMode === 'EN_RU') ? curN.b : curN.a;
+    const question = (dirMode === 'EN_RU') ? current.a : current.b;
+    const correct  = (dirMode === 'EN_RU') ? current.b : current.a;
 
-    const pool = st.active
+    const pool = S[appMode].active
       .filter(x => x !== current)
-      .map(x => {
-        const n = normalizeItem(x);
-        return (dirMode === 'EN_RU') ? n.b : n.a;
-      })
-      .filter(Boolean);
+      .map(x => (dirMode === 'EN_RU') ? x.b : x.a);
 
     const wrongs = pickWrongOptions(pool, correct, 3);
     const options = shuffle([correct, ...wrongs]);
@@ -476,12 +430,7 @@
     }
 
     const q = buildQuestion();
-    if (!q || !q.question || !q.correct){
-      // если актив содержит мусор — просто перешагиваем
-      setMsg('Есть кривые строки в активном наборе. Пропускаю…','bad');
-      setTimeout(goNext, 120);
-      return;
-    }
+    if (!q) return;
 
     elQuestion.textContent = q.question;
     elHint.textContent = (dirMode === 'EN_RU')
@@ -521,11 +470,6 @@
 
   function startRound(){
     const st = S[appMode];
-    if (!st.active || st.active.length < 4){
-      current = null;
-      renderTraining(true);
-      return;
-    }
     deck = shuffle([...Array(st.active.length).keys()]);
     pos = 0;
     current = st.active[deck[pos]];
@@ -569,33 +513,23 @@
 
   function moveActiveToLearned(){
     const st = S[appMode];
-    const merged = [...st.learned, ...st.active]
-      .map(normalizeItem)
-      .filter(x => x.a && x.b)
-      .map(x => ({a:x.a, b:x.b}));
+    const merged = [...st.learned, ...st.active];
     st.learned = dedupePairs(merged).out;
     saveModeData(appMode);
   }
 
   function takeNewBatchFromVault(){
     const st = S[appMode];
-
     if (st.active.length) moveActiveToLearned();
 
     const shuffledVault = shuffle(st.vault.slice());
-    const takeRaw = shuffledVault.slice(0, BATCH_SIZE).map(normalizeItem);
-    const take = takeRaw.filter(x => x.a && x.b).map(x => ({a:x.a, b:x.b}));
+    const take = shuffledVault.slice(0, BATCH_SIZE);
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
-    const rest = st.vault
-      .map(normalizeItem)
-      .filter(x => x.a && x.b)
-      .map(x => ({a:x.a, b:x.b}))
-      .filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
+    const rest = st.vault.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
 
     st.active = take;
     st.vault = rest;
-
     saveModeData(appMode);
 
     if (st.active.length < 4){
@@ -612,19 +546,14 @@
   function takeRepeatFromLearned(){
     const st = S[appMode];
 
-    const shuffled = shuffle(st.learned.slice()).map(normalizeItem);
-    const take = shuffled.slice(0, BATCH_SIZE).filter(x => x.a && x.b).map(x => ({a:x.a, b:x.b}));
+    const shuffled = shuffle(st.learned.slice());
+    const take = shuffled.slice(0, BATCH_SIZE);
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
-    const rest = st.learned
-      .map(normalizeItem)
-      .filter(x => x.a && x.b)
-      .map(x => ({a:x.a, b:x.b}))
-      .filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
+    const rest = st.learned.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
 
     st.active = take;
     st.learned = rest;
-
     saveModeData(appMode);
 
     if (st.active.length < 4){
