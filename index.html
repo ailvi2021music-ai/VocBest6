@@ -173,7 +173,7 @@
         <summary><span id="vaultTitle">Резерв</span> <span id="vaultCount">(0)</span></summary>
 
         <div class="muted" id="vaultHelp">
-          Формат: english - русский, по одному на строку.
+          Формат: english - русский, по одному на строку. Разделитель строго: пробел-дефис-пробел.
         </div>
 
         <div class="taWrap">
@@ -271,13 +271,11 @@
 
   function splitLine(line) {
     const s = line.trim();
-    // ВАЖНО: разделитель должен быть именно "пробел-даш-пробел".
-    // Это защищает от ошибок, когда тире встречается внутри русского текста (или внутри английского).
-    const seps = [' - ', ' — ', ' – '];
-    for (const sep of seps) {
-      const i = s.indexOf(sep);
-      if (i > -1) return [s.slice(0,i).trim(), s.slice(i+sep.length).trim()];
-    }
+    // Разделитель ТОЛЬКО: " - " (пробел-дефис-пробел).
+    // Длинные тире — и любые тире внутри текста — не трогаем.
+    const sep = ' - ';
+    const i = s.indexOf(sep);
+    if (i > -1) return [s.slice(0,i).trim(), s.slice(i+sep.length).trim()];
     return [s,''];
   }
 
@@ -385,8 +383,8 @@
   function modeLabel(){ return appMode === 'words' ? 'Слова' : 'Предложения'; }
   function reserveHelpText(){
     return appMode === 'words'
-      ? 'Формат: english - русский, по одному на строку.'
-      : 'Формат: English sentence - Русский смысл, по одному на строку.';
+      ? 'Формат: english - русский, по одному на строку. Разделитель строго: пробел-дефис-пробел.'
+      : 'Формат: English sentence - Русский смысл, по одному на строку. Разделитель строго: пробел-дефис-пробел.';
   }
 
   function setMsg(text, kind=''){
@@ -404,10 +402,8 @@
     elVaultTitle.textContent = 'Резерв';
     elLearnedTitle.textContent = 'Выучено';
     elVaultHelp.textContent = reserveHelpText();
-    // КНОПКА "НОВЫЕ" ВСЕГДА ОДИНАКОВАЯ
     btnNew.textContent = 'Новые';
     btnDir.textContent = (dirMode === 'EN_RU') ? 'EN→RU' : 'RU→EN';
-
     dotLeft.classList.toggle('on', appMode === 'words');
     dotRight.classList.toggle('on', appMode === 'sent');
   }
@@ -479,7 +475,7 @@
       lock = true;
       setMsg('Молодец ✅','ok');
       disableAnswers(true);
-      setTimeout(goNext, AUTO_NEXT_MS);
+      setTimeout(goNext, 350);
     } else {
       setMsg(`Неправильно ❌ Правильный: ${correct}`,'bad');
     }
@@ -516,6 +512,11 @@
     const { pairs, badCount } = parseTextarea(taVault.value);
     const { out, removed } = dedupePairs(pairs);
 
+    if (out.length < 4){
+      setMsg(`Нужно минимум 4 валидные строки в резерв (${modeLabel()}).`,'bad');
+      return;
+    }
+
     S[appMode].vault = out;
     saveModeData(appMode);
     syncTextareas();
@@ -538,18 +539,16 @@
 
   function takeNewBatchFromVault(){
     const st = S[appMode];
-
     if (st.active.length) moveActiveToLearned();
 
     const shuffledVault = shuffle(st.vault.slice());
-    const take = shuffledVault.slice(0, BATCH_SIZE);
+    const take = shuffledVault.slice(0, 10);
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
     const rest = st.vault.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
 
     st.active = take;
     st.vault = rest;
-
     saveModeData(appMode);
 
     if (st.active.length < 4){
@@ -567,7 +566,7 @@
     const st = S[appMode];
 
     const shuffled = shuffle(st.learned.slice());
-    const take = shuffled.slice(0, BATCH_SIZE);
+    const take = shuffled.slice(0, 10);
 
     const takeSet = new Set(take.map(x => norm(x.a)+'||'+norm(x.b)));
     const rest = st.learned.filter(x => !takeSet.has(norm(x.a)+'||'+norm(x.b)));
