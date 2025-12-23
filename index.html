@@ -173,7 +173,7 @@
         <summary><span id="vaultTitle">Резерв</span> <span id="vaultCount">(0)</span></summary>
 
         <div class="muted" id="vaultHelp">
-          Формат: english - русский, по одному на строку. Минимум 4 строки.
+          Формат: english - русский, по одному на строку.
         </div>
 
         <div class="taWrap">
@@ -387,8 +387,8 @@
   function modeLabel(){ return appMode === 'words' ? 'Слова' : 'Предложения'; }
   function reserveHelpText(){
     return appMode === 'words'
-      ? 'Формат: english - русский, по одному на строку. Минимум 4 строки.'
-      : 'Формат: English sentence - Русский смысл, по одному на строку. Минимум 4 строки.';
+      ? 'Формат: english - русский, по одному на строку.'
+      : 'Формат: English sentence - Русский смысл, по одному на строку.';
   }
 
   function setMsg(text, kind=''){
@@ -517,6 +517,12 @@
   function saveVaultFromTextarea(){
     const { pairs, badCount } = parseTextarea(taVault.value);
     const { out, removed } = dedupePairs(pairs);
+
+    if (out.length < 4){
+      setMsg(`Нужно минимум 4 валидные строки в резерв (${modeLabel()}).`,'bad');
+      return;
+    }
+
     S[appMode].vault = out;
     saveModeData(appMode);
     syncTextareas();
